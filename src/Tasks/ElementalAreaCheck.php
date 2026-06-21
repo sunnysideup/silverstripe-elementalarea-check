@@ -31,8 +31,11 @@ class ElementalAreaCheck extends BuildTask
         if ($this->config()->get('include_versions')) {
             $array[] = '_Versions';
         }
-        $dryRunOnly = $request->getVar('dryrunonly') ?: $this->config()->get('dry_run_only');
-        $quickTestOnly = $request->getVar('quicktestonly') ?: $this->config()->get('quick_test_only');
+        $dryRunOnly = $request && $request->getVar('dryrunonly') ?: $this->config()->get('dry_run_only');
+        echo "Dry run only: " . ($dryRunOnly ? "Yes" : "No") . "\n";
+        $quickTestOnly = $request && $request->getVar('quicktestonly') ?: $this->config()->get('quick_test_only');
+        echo "Quick test only: " . ($quickTestOnly ? "Yes" : "No") . "\n";
+
         if (!$quickTestOnly) {
             echo "Running full check...\n";
             foreach ($array as $suffix) {
@@ -119,35 +122,46 @@ class ElementalAreaCheck extends BuildTask
         return null;
     }
 
-    protected function checkElementalAreasWithoutPages(): array
+    protected function checkElementalAreasWithoutPages(): void
     {
         $elementalAreasWithoutPages = [];
         $elementalAreas = ElementalArea::get();
         foreach ($elementalAreas as $area) {
-            $page = $this->findParent($area->ID);
-            if (! $page) {
+            $className = $area->OwnerClassName;
+            $topPageID = $area->TopPageID;
+            if ($className && $topPageID) {
+                $page = SiteTree::get()->filter('ID', $topPageID)->first();
+                if (! $page || $page->ElementalAreaID !== $area->ID) {
+                    $elementalAreasWithoutPages[] = $area;
+                    echo "ERROR: ElementalArea ID {$area->ID} has OwnerClassName {$area->OwnerClassName} and TopPageID {$area->TopPageID} but no matching page found.\n";
+                }
+            } else {
                 $elementalAreasWithoutPages[] = $area;
-                echo "ElementalArea ID {$area->ID} has no associated page.\n";
+                echo "ERROR: ElementalArea ID {$area->ID} has missing OwnerClassName or TopPageID.\n";
             }
         }
-        return $elementalAreasWithoutPages;
+        if (count($elementalAreasWithoutPages) === 0) {
+            echo "All ElementalAreas have valid OwnerClassName and TopPageID.\n";
+        }
     }
 
-    protected function checkPagesWithoutElementalArea(): array
+    protected function checkPagesWithoutElementalArea(): void
     {
         $pagesWithoutElementalArea = [];
         foreach ($this->findValidClasses() as $class) {
             $pages = $class::get();
             $uniqueElementalAreaIDsFromPages = $pages->columnUnique('ElementalAreaID');
             $uniqueElementalAreaIDsFromObjects = ElementalArea::get()->columnUnique('ID');
-            $uniqueElementalAreaIDs = array_diff($uniqueElementalAreaIDsFromPages, $uniqueElementalAreaIDsFromObjects);
+            $uniqueElementalAreaIDs = array_diff($uniqueElementalAreaIDsFromPages, $uniqueElementalAreaIDsFromObjects) + [-1 => -1];
             $pages = $pages->filter('ElementalAreaID', $uniqueElementalAreaIDs);
             foreach ($pages as $page) {
                 $pagesWithoutElementalArea[] = $page;
-                echo "Page ID {$page->ID} of class {$page->ClassName} has ElementalAreaID {$page->ElementalAreaID} which does not exist in ElementalArea table.\n";
+                echo "ERROR: Page ID {$page->ID} of class {$page->ClassName} has ElementalAreaID {$page->ElementalAreaID} which does not exist in ElementalArea table.\n";
             }
         }
-        return $pagesWithoutElementalArea;
+        if (count($pagesWithoutElementalArea) === 0) {
+            echo "All pages have valid ElementalAreaID.\n";
+        }
     }
 
     protected function findValidClasses(): array
