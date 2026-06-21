@@ -11,7 +11,6 @@ use SilverStripe\Dev\BuildTask;
 use SilverStripe\ORM\DataObject;
 use SilverStripe\ORM\DataObjectInterface;
 use SilverStripe\ORM\DB;
-use Sunnysideup\DatabaseMigrations\Interfaces\AtomicMigrationInterface;
 
 class ElementalAreaCheck extends BuildTask
 {
