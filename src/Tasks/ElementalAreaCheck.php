@@ -20,6 +20,9 @@ class ElementalAreaCheck extends BuildTask
 
     private static bool $include_versions = false;
 
+    private static bool $dry_run_only = false;
+    private static bool $quick_test_only = false;
+
     protected $description = 'Checks and updates elemental areas on pages';
 
     public function run($request)
@@ -28,42 +31,54 @@ class ElementalAreaCheck extends BuildTask
         if ($this->config()->get('include_versions')) {
             $array[] = '_Versions';
         }
-        foreach ($array as $suffix) {
-            $rows = DB::query('SELECT "ID", "OwnerClassName", "TopPageID" FROM "ElementalArea'.$suffix.'"');
-            foreach ($rows as $row) {
-                $id = $row['ID'];
-                $ownerClassName = $row['OwnerClassName'];
-                $topPageID = $row['TopPageID'];
-                $page = SiteTree::get()->filter('ID', $topPageID)->first();
-                if ($page && $page->ElementalAreaID !== $id) {
-                    echo "Found mismatch for ElementalArea ID $id: TopPageID $topPageID has ElementalAreaID {$page->ElementalAreaID}\n";
-                    $page = $this->findParent($id);
-                } elseif (! $page) {
-                    echo "No page found with ID $topPageID for ElementalArea ID $id\n";
-                    $page = $this->findParent($id);
-                }
-                if ($page) {
-                    if ($page->ClassName !== $ownerClassName) {
-                        echo "Updating ElementalArea ID $id: OwnerClassName set to $page->ClassName\n";
-                        DB::query("UPDATE \"ElementalArea".$suffix."\" SET \"OwnerClassName\" = '".addslashes($page->ClassName)."', \"TopPageID\" = $page->ID WHERE \"ID\" = $id");
-                    } elseif ($page->ID !== $topPageID) {
-                        echo "Updating ElementalArea ID $id: TopPageID set to $page->ID\n";
-                        DB::query("UPDATE \"ElementalArea".$suffix."\" SET \"TopPageID\" = $page->ID WHERE \"ID\" = $id");
-                    } else {
-                        echo "OK\n";
+        $dryRunOnly = $request->getVar('dryrunonly') ?: $this->config()->get('dry_run_only');
+        $quickTestOnly = $request->getVar('quicktestonly') ?: $this->config()->get('quick_test_only');
+        if (!$quickTestOnly) {
+            echo "Running full check...\n";
+            foreach ($array as $suffix) {
+                $rows = DB::query('SELECT "ID", "OwnerClassName", "TopPageID" FROM "ElementalArea'.$suffix.'"');
+                foreach ($rows as $row) {
+                    $id = $row['ID'];
+                    $ownerClassName = $row['OwnerClassName'];
+                    $topPageID = $row['TopPageID'];
+                    $page = SiteTree::get()->filter('ID', $topPageID)->first();
+                    if ($page && $page->ElementalAreaID !== $id) {
+                        echo "Found mismatch for ElementalArea ID $id: TopPageID $topPageID has ElementalAreaID {$page->ElementalAreaID}\n";
+                        $page = $this->findParent($id);
+                    } elseif (! $page) {
+                        echo "No page found with ID $topPageID for ElementalArea ID $id\n";
+                        $page = $this->findParent($id);
                     }
-                } else {
-                    echo "No page found for ElementalArea ID $id with OwnerClassName $ownerClassName and TopPageID $topPageID\n";
-                    if ($suffix !== '_Versions') {
-                        echo "Deleting ElementalArea ID $id from table ElementalArea$suffix\n";
-                        DB::query("DELETE FROM \"ElementalArea".$suffix."\" WHERE \"ID\" = $id");
+                    if ($page) {
+                        if ($page->ClassName !== $ownerClassName) {
+                            echo "Updating ElementalArea ID $id: OwnerClassName set to $page->ClassName\n";
+                            if (! $dryRunOnly) {
+                                DB::query("UPDATE \"ElementalArea".$suffix."\" SET \"OwnerClassName\" = '".addslashes($page->ClassName)."', \"TopPageID\" = $page->ID WHERE \"ID\" = $id");
+                            }
+                        } elseif ($page->ID !== $topPageID) {
+                            echo "Updating ElementalArea ID $id: TopPageID set to $page->ID\n";
+                            if (! $dryRunOnly) {
+                                DB::query("UPDATE \"ElementalArea".$suffix."\" SET \"TopPageID\" = $page->ID WHERE \"ID\" = $id");
+                            }
+                        } else {
+                            echo "OK\n";
+                        }
                     } else {
-                        echo "Skipping deletion of ElementalArea ID $id from Versions table\n";
+                        echo "No page found for ElementalArea ID $id with OwnerClassName $ownerClassName and TopPageID $topPageID\n";
+                        if ($suffix !== '_Versions') {
+                            echo "Deleting ElementalArea ID $id from table ElementalArea$suffix\n";
+                            if (! $dryRunOnly) {
+                                DB::query("DELETE FROM \"ElementalArea".$suffix."\" WHERE \"ID\" = $id");
+                            }
+                        } else {
+                            echo "Skipping deletion of ElementalArea ID $id from Versions table\n";
+                        }
                     }
                 }
             }
         }
         $this->checkPagesWithoutElementalArea();
+        $this->checkElementalAreasWithoutPages();
 
     }
 
@@ -89,12 +104,9 @@ class ElementalAreaCheck extends BuildTask
 
         $items = [];
         foreach ($classes as $class) {
-            $obj = Injector::inst()->get($class);
-            if ($obj->hasExtension(ElementalPageExtension::class)) {
-                $pages = $class::get()->filter('ElementalAreaID', $id);
-                foreach ($pages as $page) {
-                    $items[$page->ID] = $page;
-                }
+            $pages = $class::get()->filter('ElementalAreaID', $id);
+            foreach ($pages as $page) {
+                $items[$page->ID] = $page;
             }
         }
         if (count($items) > 1) {
@@ -105,6 +117,20 @@ class ElementalAreaCheck extends BuildTask
             echo "No pages found for ElementalArea ID $id\n";
         }
         return null;
+    }
+
+    protected function checkElementalAreasWithoutPages(): array
+    {
+        $elementalAreasWithoutPages = [];
+        $elementalAreas = ElementalArea::get();
+        foreach ($elementalAreas as $area) {
+            $page = $this->findParent($area->ID);
+            if (! $page) {
+                $elementalAreasWithoutPages[] = $area;
+                echo "ElementalArea ID {$area->ID} has no associated page.\n";
+            }
+        }
+        return $elementalAreasWithoutPages;
     }
 
     protected function checkPagesWithoutElementalArea(): array
