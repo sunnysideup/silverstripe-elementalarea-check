@@ -18,11 +18,17 @@ class ElementalAreaCheck extends BuildTask
 
     protected $title = 'Elemental Area Check';
 
+    private static bool $include_versions = false;
+
     protected $description = 'Checks and updates elemental areas on pages';
 
     public function run($request)
     {
-        foreach (['', '_Live', '_Versions'] as $suffix) {
+        $array = ['', '_Live'];
+        if ($this->config()->get('include_versions')) {
+            $array[] = '_Versions';
+        }
+        foreach ($array as $suffix) {
             $rows = DB::query('SELECT "ID", "OwnerClassName", "TopPageID" FROM "ElementalArea'.$suffix.'"');
             foreach ($rows as $row) {
                 $id = $row['ID'];
